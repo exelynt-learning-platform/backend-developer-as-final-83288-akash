@@ -1,0 +1,36 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: Resource-Booking-System
+
+  # MySQL DATABASE
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/bookingSystemDB
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+
+  # JPA
+  jpa:
+    show-sql: true
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+
+jwt:
+  secret: ${SECRET_KEY}
+
+logging:
+  level:
+    org.springframework.security: DEBUG
