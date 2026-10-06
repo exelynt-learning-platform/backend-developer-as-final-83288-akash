@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import org.springframework.validation.annotation.Validated;
 
+import java.math.BigDecimal;
+
 @NoArgsConstructor
 @AllArgsConstructor
 @Getter
@@ -23,5 +25,5 @@ public class Resource
     private String resourceName;
 
     @NotNull(message = "Resource Price is required!")
-    private Double price;
+    private BigDecimal price;
 }

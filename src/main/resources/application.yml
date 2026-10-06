@@ -1,6 +1,3 @@
-server:
-  port: 8080
-
 spring:
   application:
     name: Resource-Booking-System
@@ -22,6 +19,10 @@ spring:
       hibernate:
         format_sql: true
 
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+
 springdoc:
   api-docs:
     enabled: true
@@ -34,3 +35,4 @@ jwt:
 logging:
   level:
     org.springframework.security: DEBUG
+    web: DEBUG

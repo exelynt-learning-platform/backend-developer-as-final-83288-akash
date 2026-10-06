@@ -23,6 +23,10 @@ public class SecurityConfig
         http
                 .csrf(csrf -> csrf.disable()
                         .authorizeHttpRequests(auth -> auth
+                                .requestMatchers(
+                                        "/swagger-ui/**",
+                                        "/v3/api-docs/**"
+                                ).permitAll()
                                 .requestMatchers("/api/auth/login").permitAll()
                                 .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
                                 // FOR User Management
@@ -30,9 +34,9 @@ public class SecurityConfig
                                 .requestMatchers(HttpMethod.GET,
                                         "/api/booking/users").hasRole("ADMIN")
                                 .requestMatchers(HttpMethod.GET,
-                                        "/api/booking/users/*").hasRole("ADMIN")
+                                        "/api/booking/users/*").hasAnyRole("ADMIN", "USER")
                                 .requestMatchers(HttpMethod.PUT,
-                                        "/api/booking/users/*").hasRole("ADMIN")
+                                        "/api/booking/users/*").hasAnyRole("ADMIN","USER")
                                 .requestMatchers(HttpMethod.DELETE,
                                         "/api/booking/users/*").hasRole("ADMIN")
 
@@ -63,7 +67,8 @@ public class SecurityConfig
                                 // ADMIN ONLY
                                 .requestMatchers(HttpMethod.PUT,
                                         "/api/booking/reservations/*").hasRole("ADMIN")
-
+                                .requestMatchers(HttpMethod.DELETE,
+                                        "/api/booking/reservation/*").hasRole("ADMIN")
                                 .anyRequest().authenticated()))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt

@@ -8,6 +8,8 @@ import com.bookingSystem.helper.PageResponse;
 import com.bookingSystem.repository.ReservationRepository;
 import com.bookingSystem.repository.ResourceRepository;
 import com.bookingSystem.repository.UserRepository;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -23,21 +25,25 @@ import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.web.authentication.preauth.PreAuthenticatedCredentialsNotFoundException;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 public class ReservationServiceImplTest {
+
+    private static final Pageable PAGEABLE = PageRequest.of(0, 2);
+    private static final LocalDateTime START = LocalDateTime.of(2026, 12, 3, 10, 0);
+    private static final LocalDateTime END = LocalDateTime.of(2026, 12, 5, 16, 0);
 
     @Mock
     private Authentication authentication;
@@ -54,62 +60,117 @@ public class ReservationServiceImplTest {
     @InjectMocks
     private ReservationServiceImpl reservationService;
 
-    @Test
-    void addReservation_shouldCreateReservationSuccessfully(){
-        ReservationRequest reservationRequest = ReservationRequest.builder()
-                .resourceId(205)
-                .userId(9)
-                .startDate(LocalDateTime.of(2026, 10, 1, 10,0))
-                .endDate(LocalDateTime.of(2026, 10,3, 18,0))
-                .build();
+    // ------------------------------------------------------------------
+    // Shared helpers
+    // ------------------------------------------------------------------
 
-        Resource resource = Resource.builder()
-                .id(205)
-                .resourceName("Sony Alpha Camera")
-                .price(98000.00)
-                .build();
+    @BeforeEach
+    @AfterEach
+    void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
 
-        User user = User.builder()
-                .id(9)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+    private static BigDecimal bd(double value) {
+        return BigDecimal.valueOf(value);
+    }
 
-        when(resourceRepository.findById(205))
-                .thenReturn(Optional.of(resource));
+    private static User user(int id, String email) {
+        return User.builder().id(id).email(email).role(UserRole.USER).build();
+    }
 
-        when(userRepository.findById(9))
-                .thenReturn(Optional.of(user));
+    private static Resource resource(int id) {
+        return Resource.builder().id(id).build();
+    }
 
-        when(authentication.getName())
-                .thenReturn("rohit@gmail.com");
+    private static Resource resource(int id, double price) {
+        return Resource.builder().id(id).price(bd(price)).build();
+    }
 
-        when(authentication.getAuthorities())
-                .then( (auth) -> List.of(
-                        new SimpleGrantedAuthority("ROLE_USER")
-                ));
+    private static Reservation reservation(int id, ReservationStatus status, User user, Resource resource) {
+        return reservation(id, status, user, resource, null, null);
+    }
 
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("rohit@gmail.com"))
-                .thenReturn(Optional.of(user));
-
-        Reservation savedReservation = Reservation.builder()
-                .id(118)
-                .status(ReservationStatus.PENDING)
-                .startDate(reservationRequest.getStartDate())
-                .endDate(reservationRequest.getEndDate())
+    private static Reservation reservation(int id, ReservationStatus status, User user, Resource resource,
+                                           LocalDateTime start, LocalDateTime end) {
+        return Reservation.builder()
+                .id(id)
+                .status(status)
                 .user(user)
                 .resource(resource)
+                .startDate(start)
+                .endDate(end)
                 .build();
+    }
 
-        when(repository.save(any(Reservation.class)))
-                .thenReturn(savedReservation);
+    private static ReservationRequest request(int userId, int resourceId, LocalDateTime start, LocalDateTime end) {
+        return ReservationRequest.builder()
+                .userId(userId)
+                .resourceId(resourceId)
+                .startDate(start)
+                .endDate(end)
+                .build();
+    }
 
-        ReservationResponse response = this.reservationService.addReservation(reservationRequest);
+    /** Builds a page of reservations (ids 1 to n) with the given statuses. */
+    private static Page<Reservation> reservationPage(User user, Resource resource, ReservationStatus... statuses) {
+        List<Reservation> content = new ArrayList<>();
+        for (int i = 0; i < statuses.length; i++) {
+            content.add(reservation(i + 1, statuses[i], user, resource));
+        }
+        return new PageImpl<>(content, PAGEABLE, content.size());
+    }
+
+    /** Puts the mocked Authentication into the SecurityContext. */
+    private void authenticate() {
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+    }
+
+    /** Authenticated with only an email (no authorities stubbed). */
+    private void authenticateWithEmail(String email) {
+        when(authentication.getName()).thenReturn(email);
+        authenticate();
+    }
+
+    private void authenticateAsAdmin() {
+        when(authentication.getAuthorities())
+                .then(a -> List.of(new SimpleGrantedAuthority("ROLE_ADMIN")));
+        authenticate();
+    }
+
+    private void authenticateAsAdmin(String email) {
+        when(authentication.getName()).thenReturn(email);
+        authenticateAsAdmin();
+    }
+
+    private void authenticateAsUser() {
+        when(authentication.getAuthorities())
+                .then(a -> List.of(new SimpleGrantedAuthority("ROLE_USER")));
+        authenticate();
+    }
+
+    private void authenticateAsUser(String email) {
+        when(authentication.getName()).thenReturn(email);
+        authenticateAsUser();
+    }
+
+    // ------------------------------------------------------------------
+    // addReservation
+    // ------------------------------------------------------------------
+
+    @Test
+    void addReservation_shouldCreateReservationSuccessfully() {
+        User user = user(9, "rohit@gmail.com");
+        Resource resource = resource(205, 98000.00);
+        ReservationRequest request = request(9, 205, START, END);
+        Reservation savedReservation = reservation(118, ReservationStatus.PENDING, user, resource, START, END);
+
+        authenticateAsUser("rohit@gmail.com");
+        when(resourceRepository.findById(205)).thenReturn(Optional.of(resource));
+        when(userRepository.findById(9)).thenReturn(Optional.of(user));
+        when(userRepository.findByEmail("rohit@gmail.com")).thenReturn(Optional.of(user));
+        when(repository.save(any(Reservation.class))).thenReturn(savedReservation);
+
+        ReservationResponse response = reservationService.addReservation(request);
 
         assertNotNull(response);
         assertEquals(118, response.getId());
@@ -119,701 +180,275 @@ public class ReservationServiceImplTest {
         verify(userRepository).findByEmail("rohit@gmail.com");
         verify(resourceRepository).findById(205);
 
-        ArgumentCaptor<Reservation> captor =
-                ArgumentCaptor.forClass(Reservation.class);
-
+        ArgumentCaptor<Reservation> captor = ArgumentCaptor.forClass(Reservation.class);
         verify(repository).save(captor.capture());
 
         Reservation saved = captor.getValue();
-
         assertEquals(ReservationStatus.PENDING, saved.getStatus());
         assertEquals(user, saved.getUser());
         assertEquals(resource, saved.getResource());
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void addReservation_shouldThrowException_whenUserCreatesReservationForAnotherUser(){
-        ReservationRequest request = ReservationRequest.builder()
-                .resourceId(205)
-                .userId(10)
-                .startDate(LocalDateTime.of(2026, 10, 1, 10, 0))
-                .endDate(LocalDateTime.of(2026, 10, 3, 18, 0))
-                .build();
+    void addReservation_shouldThrowException_whenUserCreatesReservationForAnotherUser() {
+        ReservationRequest request = request(10, 205, START, END);
+        User existingUser = user(10, "someone@gmail.com");
+        User authenticatedUser = user(9, "rohit@gmail.com");
 
-        User existingUser = User.builder()
-                .id(10)
-                .userName("someone")
-                .email("someone@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        when(userRepository.findById(10)).thenReturn(Optional.of(existingUser));
+        when(userRepository.findByEmail("rohit@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        authenticateAsUser("rohit@gmail.com");
 
-        User authenticatedUser = User.builder()
-                .id(9)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
-
-        when(userRepository.findById(10))
-                .thenReturn(Optional.of(existingUser));
-
-        // Authentication operations
-        when(authentication.getName())
-                .thenReturn("rohit@gmail.com");
-        when(authentication.getAuthorities())
-                .then((auth)->
-                        List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        ));
-        when(userRepository.findByEmail("rohit@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        assertThrows(
-                AuthorizationDeniedException.class,
-                ()-> reservationService.addReservation(request)
-        );
+        assertThrows(AuthorizationDeniedException.class, () -> reservationService.addReservation(request));
 
         verify(resourceRepository, never()).findById(any());
         verify(repository, never()).save(any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void addReservation_shouldCreateReservationWhenRoleIsAdmin(){
-        ReservationRequest request = ReservationRequest.builder()
-                .resourceId(205)
-                .userId(9)
-                .startDate(LocalDateTime.of(2026, 10, 1, 10, 0))
-                .endDate(LocalDateTime.of(2026, 10, 3, 18, 0))
-                .build();
+    void addReservation_shouldCreateReservationWhenRoleIsAdmin() {
+        ReservationRequest request = request(9, 205, START, END);
+        User existingUser = user(9, "rohit@gmail.com");
+        Resource existingResource = resource(205, 98000.00);
+        Reservation savedReservation = reservation(118, ReservationStatus.PENDING, existingUser, existingResource, START, END);
 
-        User existingUser = User.builder()
-                .id(9)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        when(resourceRepository.findById(205)).thenReturn(Optional.of(existingResource));
+        when(userRepository.findById(9)).thenReturn(Optional.of(existingUser));
+        authenticateAsAdmin("akash@gmail.com");
+        when(repository.save(any(Reservation.class))).thenReturn(savedReservation);
 
-        Resource existingResource = Resource.builder()
-                .id(205)
-                .resourceName("Sony Alpha Camera")
-                .price(98000.00)
-                .build();
+        ReservationResponse response = reservationService.addReservation(request);
 
-        when(resourceRepository.findById(205))
-                .thenReturn(Optional.of(existingResource));
-
-        when(userRepository.findById(9))
-                .thenReturn(Optional.of(existingUser));
-
-        // ADMIN Authentication
-        when(authentication.getName())
-                .thenReturn("akash@gmail.com");
-        when(authentication.getAuthorities())
-                .then( (auth) -> List.of(
-                        new SimpleGrantedAuthority("ROLE_ADMIN")
-                ));
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        Reservation savedReservation = Reservation.builder()
-                .id(118)
-                .status(ReservationStatus.PENDING)
-                .startDate(request.getStartDate())
-                .endDate(request.getEndDate())
-                .user(existingUser)
-                .resource(existingResource)
-                .build();
-
-        when(repository.save(any(Reservation.class)))
-                .thenReturn(savedReservation);
-
-
-        // Execute
-        ReservationResponse response =
-                reservationService.addReservation(request);
-
-        // Response assertions
         assertNotNull(response);
         assertEquals(118, response.getId());
         assertEquals(ReservationStatus.PENDING.toString(), response.getStatus());
 
-        // Repository interactions verification
         verify(userRepository).findById(9);
         verify(resourceRepository).findById(205);
-        verify(repository).save(any(Reservation.class));
+        // ADMIN should not need to be looked up by email
+        verify(userRepository, never()).findByEmail(any());
 
-        // ADMIN should not need to find himself by email
-        verify(userRepository, never())
-                .findByEmail(any());
-
-        // Verify actual reservation passed to save
-        ArgumentCaptor<Reservation> captor =
-                ArgumentCaptor.forClass(Reservation.class);
-
+        ArgumentCaptor<Reservation> captor = ArgumentCaptor.forClass(Reservation.class);
         verify(repository).save(captor.capture());
 
         Reservation saved = captor.getValue();
-
         assertEquals(ReservationStatus.PENDING, saved.getStatus());
         assertEquals(existingUser, saved.getUser());
         assertEquals(existingResource, saved.getResource());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void addReservation_shouldThrowException_WhenUserCreateReservationForAUserWhichDoesNotExist(){
-        ReservationRequest request = ReservationRequest.builder()
-                .resourceId(205)
-                .userId(10)
-                .startDate(LocalDateTime.of(2026, 10, 1, 10, 0))
-                .endDate(LocalDateTime.of(2026, 10, 3, 18, 0))
-                .build();
+    void addReservation_shouldThrowException_WhenUserCreateReservationForAUserWhichDoesNotExist() {
+        ReservationRequest request = request(10, 205, START, END);
 
-        when(authentication.getName())
-                .thenReturn("rohit@gmail.com");
-        when(authentication.getAuthorities())
-                .then( (auth) -> List.of(
-                        new SimpleGrantedAuthority("ROLE_USER")
-                ));
+        authenticateAsUser("rohit@gmail.com");
+        when(userRepository.findById(10)).thenReturn(Optional.empty());
 
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findById(10))
-                .thenReturn(Optional.empty());
-
-        assertThrows(
-                UserDoesNotExistException.class,
-                ()-> reservationService.addReservation(request)
-        );
+        assertThrows(UserDoesNotExistException.class, () -> reservationService.addReservation(request));
 
         verify(userRepository).findById(10);
-        verify(resourceRepository, never())
-                .findById(any());
-        verify((repository), never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(resourceRepository, never()).findById(any());
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void addReservation_shouldThrowException_ResourceDoesNotExist(){
-        ReservationRequest request = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,10,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+    void addReservation_shouldThrowException_ResourceDoesNotExist() {
+        ReservationRequest request = request(10, 205, START, END);
+        User user = user(10, "rohit@gmail.com");
 
-        User user = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        authenticateAsUser("rohit@gmail.com");
+        when(userRepository.findByEmail("rohit@gmail.com")).thenReturn(Optional.of(user));
+        when(userRepository.findById(10)).thenReturn(Optional.of(user));
+        when(resourceRepository.findById(205)).thenReturn(Optional.empty());
 
-        User authenticatedUser = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
-
-        when(authentication.getName())
-                .thenReturn("rohit@gmail.com");
-        when(authentication.getAuthorities())
-                .then( (auth) -> List.of(
-                        new SimpleGrantedAuthority("ROLE_USER")
-                ));
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("rohit@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        when(userRepository.findById(10))
-                .thenReturn(Optional.of(user));
-        when(resourceRepository.findById(205))
-                .thenReturn(Optional.empty());
-
-        assertThrows(
-                ResourceDoesNotExistException.class,
-                ()-> reservationService.addReservation(request)
-        );
+        assertThrows(ResourceDoesNotExistException.class, () -> reservationService.addReservation(request));
 
         verify(resourceRepository).findById(205);
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void addReservation_shouldThrowException_InvalidDateException(){
-        ReservationRequest request = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,6,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+    void addReservation_shouldThrowException_InvalidDateException() {
+        // start date is after end date
+        ReservationRequest request = request(10, 205, LocalDateTime.of(2026, 12, 6, 10, 0), END);
+        User user = user(10, "rohit@gmail.com");
 
-        User user = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        authenticateAsUser("rohit@gmail.com");
+        when(userRepository.findById(10)).thenReturn(Optional.of(user));
 
-        when(authentication.getName())
-                .thenReturn("rohit@gmail.com");
-        when(authentication.getAuthorities())
-                .then( (auth) -> List.of(
-                        new SimpleGrantedAuthority("ROLE_USER")
-                ));
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findById(10))
-                .thenReturn(Optional.of(user));
-
-        assertThrows(
-                InvalidDateException.class,
-                ()-> reservationService.addReservation(request)
-        );
+        assertThrows(InvalidDateException.class, () -> reservationService.addReservation(request));
 
         verify(userRepository).findById(10);
-        verify(resourceRepository, never())
-                .findById(any());
-        verify(userRepository, never())
-                .findByEmail(any());
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(resourceRepository, never()).findById(any());
+        verify(userRepository, never()).findByEmail(any());
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void addReservation_shouldThrowException_AuthenticationCredentialsNotFoundException(){
-        ReservationRequest request = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+    void addReservation_shouldThrowException_AuthenticationCredentialsNotFoundException() {
+        ReservationRequest request = request(10, 205, START, END);
 
-        authentication = null;
+        assertThrows(AuthenticationCredentialsNotFoundException.class,
+                () -> reservationService.addReservation(request));
 
-        SecurityContextHolder.getContext()
-                        .setAuthentication(authentication);
-        assertThrows(
-                AuthenticationCredentialsNotFoundException.class,
-                ()-> reservationService.addReservation(request)
-        );
-        verify(userRepository, never())
-                .findByEmail(any());
-        verify(userRepository, never())
-                .findById(any());
-        verify(resourceRepository, never())
-                .findById(any());
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(userRepository, never()).findByEmail(any());
+        verify(userRepository, never()).findById(any());
+        verify(resourceRepository, never()).findById(any());
+        verify(repository, never()).save(any());
     }
 
+    // ------------------------------------------------------------------
+    // updateReservation
+    // ------------------------------------------------------------------
 
     @Test
-    void updateReservation_shouldThrowException_whenUserIsNotAdmin(){
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+    void updateReservation_shouldThrowException_whenUserIsNotAdmin() {
+        authenticateAsUser();
 
-        assertThrows(
-                AuthorizationDeniedException.class,
-                ()-> reservationService.updateReservation(118, new ReservationRequest())
-        );
+        assertThrows(AuthorizationDeniedException.class,
+                () -> reservationService.updateReservation(118, new ReservationRequest()));
 
-        verify(userRepository, never())
-                .findByEmail(any());
-        verify(userRepository, never())
-                .findById(any());
-        verify(resourceRepository, never())
-                .findById(any());
-        verify(repository, never())
-                .findById(any());
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(userRepository, never()).findByEmail(any());
+        verify(userRepository, never()).findById(any());
+        verify(resourceRepository, never()).findById(any());
+        verify(repository, never()).findById(any());
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void updateReservation_shouldUpdateReservationSuccessfully(){
+    void updateReservation_shouldUpdateReservationSuccessfully() {
         Integer id = 118;
-        ReservationRequest updateRequest = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+        ReservationRequest updateRequest = request(10, 205, START, END);
+        User existingUser = user(10, "rohit@gmail.com");
+        Resource existingResource = resource(205, 98000.00);
+        Reservation existingReservation =
+                reservation(118, ReservationStatus.PENDING, existingUser, existingResource, START, END);
+        Reservation updatedReservation =
+                reservation(118, ReservationStatus.CONFIRMED, existingUser, existingResource, START, END);
 
-        User existingUser = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        authenticateAsAdmin();
+        when(repository.findById(id)).thenReturn(Optional.of(existingReservation));
+        // NOTE: the old `when(reservationService.getReservationListByResourceWithStatus(...))` line was
+        // removed: it stubbed the real service (not a mock), which makes Mockito throw. A mocked
+        // repository already returns an empty List by default, so "no conflicting confirmed
+        // reservations" is the default behavior here.
+        when(repository.save(any(Reservation.class))).thenReturn(updatedReservation);
 
-        Resource existingResource = Resource.builder()
-                .id(205)
-                .resourceName("Sony Alpha Camera")
-                .price(98000.00)
-                .build();
-
-        Reservation existingReservation = Reservation.builder()
-                .id(118)
-                .status(ReservationStatus.PENDING)
-                .startDate(updateRequest.getStartDate())
-                .endDate(updateRequest.getEndDate())
-                .user(existingUser)
-                .resource(existingResource)
-                .build();
-
-        Reservation updatedReservation = Reservation.builder()
-                .id(118)
-                .status(ReservationStatus.CONFIRMED)
-                .startDate(updateRequest.getStartDate())
-                .endDate(updateRequest.getEndDate())
-                .user(existingUser)
-                .resource(existingResource)
-                .build();
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(id))
-                .thenReturn(Optional.of(existingReservation));
-        when(reservationService.getReservationListByResourceWithStatus(existingReservation.getResource().getId(), ReservationStatus.CONFIRMED.toString()))
-                .thenReturn(Collections.emptyList());
-
-        when(repository.save(any(Reservation.class)))
-                .thenReturn(updatedReservation);
-
-        ReservationResponse response = this.reservationService.updateReservation(id, updateRequest);
+        ReservationResponse response = reservationService.updateReservation(id, updateRequest);
 
         assertNotNull(response);
         assertEquals(id, response.getId());
 
-        ArgumentCaptor<Reservation> captor =
-                ArgumentCaptor.forClass(Reservation.class);
-
         verify(repository).findById(id);
+
+        ArgumentCaptor<Reservation> captor = ArgumentCaptor.forClass(Reservation.class);
         verify(repository).save(captor.capture());
 
         Reservation updated = captor.getValue();
-
         assertEquals(ReservationStatus.CONFIRMED, updated.getStatus());
         assertEquals(existingUser, updated.getUser());
         assertEquals(existingResource, updated.getResource());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void updateReservation_shouldThrowException_ReservationDoesNotExist(){
+    void updateReservation_shouldThrowException_ReservationDoesNotExist() {
         Integer id = 1;
-        ReservationRequest updateRequest = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+        ReservationRequest updateRequest = request(10, 205, START, END);
 
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+        authenticateAsAdmin();
+        when(repository.findById(id)).thenReturn(Optional.empty());
 
-        when(repository.findById(id))
-                .thenReturn(Optional.empty());
+        assertThrows(ReservationDoesNotExistException.class,
+                () -> reservationService.updateReservation(id, updateRequest));
 
-        assertThrows(
-                ReservationDoesNotExistException.class,
-                ()-> reservationService.updateReservation(id, updateRequest)
-        );
-
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).save(any());
     }
 
     @Test
-    void updateReservation_shouldRejectReservationUpdate_whenStatusIsConfirmed(){
+    void updateReservation_shouldRejectReservationUpdate_whenStatusIsConfirmed() {
+        assertUpdateRejectedForStatus(ReservationStatus.CONFIRMED, ReservationAlreadyConfirmedException.class);
+    }
+
+    @Test
+    void updateReservation_shouldRejectReservationUpdate_whenStatusIsCancelled() {
+        assertUpdateRejectedForStatus(ReservationStatus.CANCELLED, ReservationAlreadyCancelledException.class);
+    }
+
+    private void assertUpdateRejectedForStatus(ReservationStatus status, Class<? extends Throwable> expected) {
         Integer id = 1;
-        ReservationRequest updateRequest = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
+        ReservationRequest updateRequest = request(10, 205, START, END);
+        Reservation existingReservation =
+                reservation(1, status, user(10, "rohit@gmail.com"), resource(205, 98000.00), START, END);
 
-        User existingUser = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
+        authenticateAsAdmin();
+        when(repository.findById(id)).thenReturn(Optional.of(existingReservation));
 
-        Resource existingResource = Resource.builder()
-                .id(205)
-                .resourceName("Sony Alpha Camera")
-                .price(98000.00)
-                .build();
+        assertThrows(expected, () -> reservationService.updateReservation(id, updateRequest));
 
-        Reservation existingReservation = Reservation.builder()
-                .id(1)
-                .status(ReservationStatus.CONFIRMED)
-                .startDate(updateRequest.getStartDate())
-                .endDate(updateRequest.getEndDate())
-                .user(existingUser)
-                .resource(existingResource)
-                .build();
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(1))
-                .thenReturn(Optional.of(existingReservation));
-
-        assertThrows(
-                ReservationAlreadyConfirmedException.class,
-                ()-> reservationService.updateReservation(id, updateRequest)
-        );
-
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).save(any());
     }
 
-    @Test
-    void updateReservation_shouldRejectReservationUpdate_whenStatusIsCancelled(){
-        Integer id = 1;
-        ReservationRequest updateRequest = ReservationRequest.builder()
-                .userId(10)
-                .resourceId(205)
-                .startDate(LocalDateTime.of(2026,12,3,10,0))
-                .endDate(LocalDateTime.of(2026,12,5,16,0))
-                .build();
-
-        User existingUser = User.builder()
-                .id(10)
-                .userName("rohit")
-                .email("rohit@gmail.com")
-                .role(UserRole.USER)
-                .build();
-
-        Resource existingResource = Resource.builder()
-                .id(205)
-                .resourceName("Sony Alpha Camera")
-                .price(98000.00)
-                .build();
-
-        Reservation existingReservation = Reservation.builder()
-                .id(1)
-                .status(ReservationStatus.CANCELLED)
-                .startDate(updateRequest.getStartDate())
-                .endDate(updateRequest.getEndDate())
-                .user(existingUser)
-                .resource(existingResource)
-                .build();
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(1))
-                .thenReturn(Optional.of(existingReservation));
-
-        assertThrows(
-                ReservationAlreadyCancelledException.class,
-                ()-> reservationService.updateReservation(id, updateRequest)
-        );
-
-        verify(repository, never())
-                .save(any());
-
-        SecurityContextHolder.clearContext();
-    }
+    // ------------------------------------------------------------------
+    // deleteReservation
+    // ------------------------------------------------------------------
 
     @Test
-    void deleteReservation_shouldDeleteExistingReservation(){
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(repository.existsById(1))
-                .thenReturn(true);
+    void deleteReservation_shouldDeleteExistingReservation() {
+        authenticateAsAdmin();
+        when(repository.existsById(1)).thenReturn(true);
+
         reservationService.deleteReservation(1);
 
         verify(repository).existsById(1);
         verify(repository).deleteById(1);
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void deleteReservation_shouldThrowException_ReservationDoesNotExist(){
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(repository.existsById(1))
-                .thenReturn(false);
+    void deleteReservation_shouldThrowException_ReservationDoesNotExist() {
+        authenticateAsAdmin();
+        when(repository.existsById(1)).thenReturn(false);
 
-        assertThrows(
-                ReservationDoesNotExistException.class,
-                ()-> reservationService.deleteReservation(1)
-        );
+        assertThrows(ReservationDoesNotExistException.class, () -> reservationService.deleteReservation(1));
 
         verify(repository).existsById(1);
-        verify(repository, never())
-                .deleteById(any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).deleteById(any());
     }
 
+    // ------------------------------------------------------------------
+    // getReservationByReservationId
+    // ------------------------------------------------------------------
+
     @Test
-    void getReservationByReservationId_shouldSuccessfullyGetReservationByIdToAdmin(){
-        User user = User.builder().id(20).build();
-        Resource resource = Resource.builder().id(30).build();
+    void getReservationByReservationId_shouldSuccessfullyGetReservationByIdToAdmin() {
+        Reservation reservation =
+                reservation(2, ReservationStatus.PENDING, user(20, null), resource(30));
 
-        Reservation reservation = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.PENDING)
-                .user(user)
-                .resource(resource)
-                .build();
+        authenticateAsAdmin();
+        when(repository.findById(any())).thenReturn(Optional.of(reservation));
 
-        // ADMIN authentication
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+        ReservationResponse response = reservationService.getReservationByReservationId(2);
 
-        // Existing Reservation
-        when(repository.findById(any()))
-                .thenReturn(Optional.of(reservation));
-
-        // Actual instruction of test
-        ReservationResponse response =
-                reservationService.getReservationByReservationId(2);
         assertNotNull(response);
         assertEquals(reservation.getId(), response.getId());
         assertEquals(reservation.getUser().getId(), response.getUser().getId());
         assertEquals(reservation.getStatus().toString(), response.getStatus());
         assertEquals(reservation.getResource().getId(), response.getResource().getId());
 
-        // verify what should change and what should not
         verify(repository).findById(2);
         verify(userRepository, never()).findByEmail(any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByReservationId_shouldSuccessfullyGetReservationByIdToOwnerUser(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByReservationId_shouldSuccessfullyGetReservationByIdToOwnerUser() {
+        User user = user(20, "user@gmail.com");
+        Reservation reservation = reservation(2, ReservationStatus.PENDING, user, resource(30));
 
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
-
-        Resource resource = Resource.builder()
-                .id(30)
-                .build();
-
-        Reservation reservation = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.PENDING)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(2))
-                .thenReturn(Optional.of(reservation));
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        authenticateAsUser("user@gmail.com");
+        when(repository.findById(2)).thenReturn(Optional.of(reservation));
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(user));
 
         ReservationResponse response = reservationService.getReservationByReservationId(2);
+
         assertNotNull(response);
         assertEquals(reservation.getId(), response.getId());
         assertEquals(reservation.getUser().getId(), response.getUser().getId());
@@ -822,750 +457,317 @@ public class ReservationServiceImplTest {
 
         verify(repository).findById(2);
         verify(userRepository).findByEmail("user@gmail.com");
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByReservationId_shouldThrowException_whenUserGetReservationOfAnotherUser(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
+    void getReservationByReservationId_shouldThrowException_whenUserGetReservationOfAnotherUser() {
+        Reservation reservation =
+                reservation(2, ReservationStatus.PENDING, user(20, "user20@gmail.com"), resource(30));
+        User authenticatedUser = user(19, "user19@gmail.com");
 
-        User authenticatedUser = User.builder()
-                .id(19)
-                .role(UserRole.USER)
-                .email("user19@gmail.com")
-                .build();
+        authenticateAsUser("user19@gmail.com");
+        when(repository.findById(2)).thenReturn(Optional.of(reservation));
+        when(userRepository.findByEmail("user19@gmail.com")).thenReturn(Optional.of(authenticatedUser));
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .build();
-
-        Reservation reservation = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.PENDING)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        when(authentication.getName())
-                .thenReturn("user19@gmail.com");
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(2))
-                .thenReturn(Optional.of(reservation));
-        when(userRepository.findByEmail("user19@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        assertThrows(
-                AuthorizationDeniedException.class,
-                ()-> reservationService.getReservationByReservationId(2)
-        );
+        assertThrows(AuthorizationDeniedException.class,
+                () -> reservationService.getReservationByReservationId(2));
 
         verify(repository).findById(2);
         verify(userRepository).findByEmail("user19@gmail.com");
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByReservationId_shouldThrowException_ReservationDoesNotExistException(){
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(repository.findById(100))
-                .thenReturn(Optional.empty());
+    void getReservationByReservationId_shouldThrowException_ReservationDoesNotExistException() {
+        authenticateAsUser();
+        when(repository.findById(100)).thenReturn(Optional.empty());
 
-        assertThrows(
-                ReservationDoesNotExistException.class,
-                ()-> reservationService.getReservationByReservationId(100)
-        );
+        assertThrows(ReservationDoesNotExistException.class,
+                () -> reservationService.getReservationByReservationId(100));
 
         verify(repository).findById(100);
         verify(authentication, never()).getName();
         verify(userRepository, never()).findByEmail(any());
-
-        SecurityContextHolder.clearContext();
     }
 
-    // Edge case Defencive Check
+    // Edge case: defensive check
     @Test
-    void getReservationByReservationId_shouldThrowException_UserDoesNotExistException(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
+    void getReservationByReservationId_shouldThrowException_UserDoesNotExistException() {
+        Reservation reservation =
+                reservation(2, ReservationStatus.PENDING, user(20, "user20@gmail.com"), resource(30));
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .build();
+        authenticateAsUser("user20@gmail.com");
+        when(repository.findById(2)).thenReturn(Optional.of(reservation));
+        when(userRepository.findByEmail("user20@gmail.com")).thenReturn(Optional.empty());
 
-        Reservation reservation = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.PENDING)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        when(authentication.getName())
-                .thenReturn("user20@gmail.com");
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findById(2))
-                .thenReturn(Optional.of(reservation));
-        when(userRepository.findByEmail("user20@gmail.com"))
-                .thenReturn(Optional.empty());
-
-        assertThrows(
-                UserDoesNotExistException.class,
-                ()-> reservationService.getReservationByReservationId(2)
-        );
+        assertThrows(UserDoesNotExistException.class,
+                () -> reservationService.getReservationByReservationId(2));
 
         verify(repository).findById(2);
         verify(userRepository).findByEmail("user20@gmail.com");
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByReservationId_shouldThrowException_AuthenticationCredentialsNotFoundException(){
-        authentication = null;
+    void getReservationByReservationId_shouldThrowException_AuthenticationCredentialsNotFoundException() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class,
+                () -> reservationService.getReservationByReservationId(2));
+    }
 
-        assertThrows(
-                PreAuthenticatedCredentialsNotFoundException.class,
-                ()-> reservationService.getReservationByReservationId(2)
-        );
+    // ------------------------------------------------------------------
+    // getAllReservations (admin only)
+    // ------------------------------------------------------------------
 
-        verify(repository, never()).findById(2);
-        verify(userRepository, never()).findByEmail(any());
+    @Test
+    void getAllReservations_shouldSuccessfullyGetAllReservationsForAdmin() {
+        Page<Reservation> page = reservationPage(user(20, "user20@gmail.com"), resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        SecurityContextHolder.clearContext();
+        authenticateAsAdmin();
+        when(repository.findAll(PAGEABLE)).thenReturn(page);
+
+        PageResponse<ReservationResponse> result = reservationService.getAllReservations(PAGEABLE, null, null);
+
+        assertNotNull(result);
+        assertEquals(page.getContent().getFirst().getStatus().toString(), result.content().getFirst().getStatus());
+        assertEquals(page.getContent().getLast().getStatus().toString(), result.content().getLast().getStatus());
+
+        verify(repository).findAll(PAGEABLE);
     }
 
     @Test
-    void getAllReservations_shouldSuccessfullyGetAllReservationsForAdmin(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
+    void getAllReservations_shouldThrowException_AuthorizationDeniedException() {
+        authenticateAsUser();
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        assertThrows(AuthorizationDeniedException.class,
+                () -> reservationService.getAllReservations(PAGEABLE, null, null));
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(user)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        Pageable pageable = PageRequest.of(0,2);
-
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                        .setAuthentication(authentication);
-        when(repository.findAll(pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservations = reservationService.getAllReservations(pageable, null, null);
-        assertNotNull(allReservations);
-        assertEquals(reservationPage.getContent().getFirst().getStatus().toString(), allReservations.content().getFirst().getStatus());
-        assertEquals(reservationPage.getContent().getLast().getStatus().toString(), allReservations.content().getLast().getStatus());
-
-        verify(repository).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).findAll(PAGEABLE);
     }
 
     @Test
-    void getAllReservations_shouldThrowException_AuthorizationDeniedException(){
-        Pageable pageable = PageRequest.of(0, 2);
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_USER")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+    void getAllReservations_shouldGetAllReservations_whenMinPriceIsGiven() {
+        BigDecimal minPrice = bd(2000.0);
+        Page<Reservation> page = reservationPage(user(20, "user20@gmail.com"), resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        assertThrows(
-                AuthorizationDeniedException.class,
-                ()-> reservationService.getAllReservations(pageable, null, null)
-        );
+        authenticateAsAdmin();
+        when(repository.findAllByMinPrice(PAGEABLE, minPrice)).thenReturn(page);
 
-        verify(repository, never()).findAll(pageable);
+        PageResponse<ReservationResponse> result = reservationService.getAllReservations(PAGEABLE, minPrice, null);
 
-        SecurityContextHolder.clearContext();
-    }
+        assertNotNull(result);
+        assertEquals(page.getContent().getFirst().getUser().getId(), result.content().getFirst().getUser().getId());
+        assertEquals(page.getContent().getLast().getResource().getId(), result.content().getLast().getResource().getId());
 
-    @Test
-    void getAllReservations_shouldGetAllReservations_whenMinPriceIsGiven(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
-
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(20000.0)
-                .resourceName("iPhone")
-                .build();
-
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(user)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        Double minPrice = 2000.0;
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findAllByMinPrice(pageable, minPrice))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservations = reservationService.getAllReservations(pageable, minPrice, null);
-        assertNotNull(allReservations);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservations.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservations.content().getLast().getResource().getId());
-
-        verify(repository).findAllByMinPrice(pageable, minPrice);
-        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(),any(),any());
+        verify(repository).findAllByMinPrice(PAGEABLE, minPrice);
+        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(), any(), any());
         verify(repository, never()).findAllByMaxPrice(any(), any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).findAll(PAGEABLE);
     }
 
-
     @Test
-    void getAllReservations_shouldGetAllReservations_whenMaxPriceIsGiven(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
+    void getAllReservations_shouldGetAllReservations_whenMaxPriceIsGiven() {
+        BigDecimal maxPrice = bd(20000.0);
+        Page<Reservation> page = reservationPage(user(20, "user20@gmail.com"), resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        authenticateAsAdmin();
+        when(repository.findAllByMaxPrice(PAGEABLE, maxPrice)).thenReturn(page);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(user)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
+        PageResponse<ReservationResponse> result = reservationService.getAllReservations(PAGEABLE, null, maxPrice);
 
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(user)
-                .resource(resource)
-                .build();
-
-        Double maxPrice = 20000.0;
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findAllByMaxPrice(pageable, maxPrice))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservations = reservationService.getAllReservations(pageable, null, maxPrice);
-        assertNotNull(allReservations);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservations.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservations.content().getLast().getResource().getId());
+        assertNotNull(result);
+        assertEquals(page.getContent().getFirst().getUser().getId(), result.content().getFirst().getUser().getId());
+        assertEquals(page.getContent().getLast().getResource().getId(), result.content().getLast().getResource().getId());
 
         verify(repository, never()).findAllByMinPrice(any(), any());
-        verify(repository).findAllByMaxPrice(pageable, maxPrice);
-        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(),any(),any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByMaxPrice(PAGEABLE, maxPrice);
+        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(), any(), any());
+        verify(repository, never()).findAll(PAGEABLE);
     }
 
-
     @Test
-    void getAllReservations_shouldGetAllReservations_whenMinPriceAndMaxPriceGiven(){
-        User user = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user20@gmail.com")
-                .build();
+    void getAllReservations_shouldGetAllReservations_whenMinPriceAndMaxPriceGiven() {
+        BigDecimal minPrice = bd(1000.0);
+        BigDecimal maxPrice = bd(30000.0);
+        Page<Reservation> page = reservationPage(user(20, "user20@gmail.com"), resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        authenticateAsAdmin();
+        when(repository.findAllByMaxPriceAndMinPrice(PAGEABLE, minPrice, maxPrice)).thenReturn(page);
 
-        Resource resource2 = Resource.builder()
-                .id(40)
-                .price(20000.0)
-                .resourceName("Ninja")
-                .build();
+        PageResponse<ReservationResponse> result = reservationService.getAllReservations(PAGEABLE, minPrice, maxPrice);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(user)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
+        assertNotNull(result);
+        assertEquals(page.getContent().getFirst().getUser().getId(), result.content().getFirst().getUser().getId());
+        assertEquals(page.getContent().getLast().getResource().getId(), result.content().getLast().getResource().getId());
 
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(user)
-                .resource(resource2)
-                .build();
-
-        Double minPrice = 1000.0;
-        Double maxPrice = 30000.0;
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(repository.findAllByMaxPriceAndMinPrice(pageable,minPrice, maxPrice))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservations = reservationService.getAllReservations(pageable, minPrice, maxPrice);
-        assertNotNull(allReservations);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservations.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservations.content().getLast().getResource().getId());
-
-        verify(repository).findAllByMaxPriceAndMinPrice(pageable, minPrice, maxPrice);
+        verify(repository).findAllByMaxPriceAndMinPrice(PAGEABLE, minPrice, maxPrice);
         verify(repository, never()).findAllByMinPrice(any(), any());
         verify(repository, never()).findAllByMaxPrice(any(), any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).findAll(PAGEABLE);
     }
 
     @Test
-    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMinPriceIsGreaterThanMaxPrice(){
-        Double minPrice = 3000.0;
-        Double maxPrice = 2000.0;
+    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMinPriceIsGreaterThanMaxPrice() {
+        authenticateAsAdmin();
 
-        Pageable pageable = Pageable.unpaged();
+        assertThrows(IllegalArgumentException.class,
+                () -> reservationService.getAllReservations(Pageable.unpaged(), bd(3000.0), bd(2000.0)));
 
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+        verifyNoAdminPriceQueries();
+    }
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservations(pageable, minPrice, maxPrice)
-        );
+    @Test
+    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMinPriceIsNegative() {
+        authenticateAsAdmin();
 
+        assertThrows(IllegalArgumentException.class,
+                () -> reservationService.getAllReservations(Pageable.unpaged(), bd(-3000.0), null));
+
+        verifyNoAdminPriceQueries();
+    }
+
+    @Test
+    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMaxPriceIsNegative() {
+        authenticateAsAdmin();
+
+        assertThrows(IllegalArgumentException.class,
+                () -> reservationService.getAllReservations(Pageable.unpaged(), null, bd(-2000.0)));
+
+        verifyNoAdminPriceQueries();
+    }
+
+    private void verifyNoAdminPriceQueries() {
         verify(repository, never()).findAllByMaxPriceAndMinPrice(any(), any(), any());
         verify(repository, never()).findAllByMinPrice(any(), any());
         verify(repository, never()).findAllByMaxPrice(any(), any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository, never()).findAll(any(Pageable.class));
     }
 
-    @Test
-    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMinPriceIsNegative(){
-        Double minPrice = -3000.0;
-        Pageable pageable = Pageable.unpaged();
-
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservations(pageable, minPrice, null)
-        );
-
-        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(), any(), any());
-        verify(repository, never()).findAllByMinPrice(any(), any());
-        verify(repository, never()).findAllByMaxPrice(any(), any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
-    }
+    // ------------------------------------------------------------------
+    // getAllReservationsByUserId
+    // ------------------------------------------------------------------
 
     @Test
-    void getAllReservations_shouldThrowException_IllegalArgumentException_whenMaxPriceIsNegative(){
-        Double maxPrice = -2000.0;
-        Pageable pageable = Pageable.unpaged();
+    void getReservationByUserId_shouldReturnUserReservations() {
+        User authenticatedUser = user(20, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserId(20, PAGEABLE)).thenReturn(page);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservations(pageable, null, maxPrice)
-        );
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByUserId(20, null, null, PAGEABLE);
 
-        verify(repository, never()).findAllByMaxPriceAndMinPrice(any(), any(), any());
-        verify(repository, never()).findAllByMinPrice(any(), any());
-        verify(repository, never()).findAllByMaxPrice(any(), any());
-        verify(repository, never()).findAll(pageable);
-
-        SecurityContextHolder.clearContext();
-    }
-
-    @Test
-    void getReservationByUserId_shouldReturnUserReservations(){
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
-
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
-
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(authenticatedUser)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(authenticatedUser)
-                .resource(resource)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-
-        Page<Reservation> reservationPage = new PageImpl<>(
-                List.of(reservation1, reservation2),
-                pageable,
-                2
-        );
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        when(repository.findAllByUserId(20, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserId = reservationService.getAllReservationsByUserId(20, null, null, pageable);
-        assertNotNull(allReservationsByUserId);
-        assertEquals(2, allReservationsByUserId.content().size());
+        assertNotNull(result);
+        assertEquals(2, result.content().size());
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserId(20, pageable);
-
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByUserId(20, PAGEABLE);
     }
 
     @Test
-    void getReservationByUserId_shouldReturnUserReservations_withMinPrice(){
-        Double minPrice = 100.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByUserId_shouldReturnUserReservations_withMinPrice() {
+        BigDecimal minPrice = bd(100.0);
+        User authenticatedUser = user(20, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithMinPrice(20, minPrice, PAGEABLE)).thenReturn(page);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(authenticatedUser)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByUserId(20, minPrice, null, PAGEABLE);
 
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(authenticatedUser)
-                .resource(resource)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-
-        Page<Reservation> reservationPage = new PageImpl<>(
-                List.of(reservation1, reservation2),
-                pageable,
-                2
-        );
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        when(repository.findAllByUserIdWithMinPrice(20, minPrice, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserIdWithMinPrice = reservationService.getAllReservationsByUserId(20, minPrice, null, pageable);
-        assertNotNull(allReservationsByUserIdWithMinPrice);
-        assertEquals(2, allReservationsByUserIdWithMinPrice.content().size());
+        assertNotNull(result);
+        assertEquals(2, result.content().size());
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithMinPrice(20, minPrice, pageable);
+        verify(repository).findAllByUserIdWithMinPrice(20, minPrice, PAGEABLE);
         verify(repository, never()).findAllByUserIdWithMinPriceAndMaxPrice(any(), any(), any(), any());
         verify(repository, never()).findAllByUserIdWithMaxPrice(any(), any(), any());
         verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByUserId_shouldReturnUserReservations_withMaxPrice(){
-        Double maxPrice = 100000.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByUserId_shouldReturnUserReservations_withMaxPrice() {
+        BigDecimal maxPrice = bd(100000.0);
+        User authenticatedUser = user(20, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithMaxPrice(20, maxPrice, PAGEABLE)).thenReturn(page);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(authenticatedUser)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByUserId(20, null, maxPrice, PAGEABLE);
 
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(authenticatedUser)
-                .resource(resource)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-
-        Page<Reservation> reservationPage = new PageImpl<>(
-                List.of(reservation1, reservation2),
-                pageable,
-                2
-        );
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        when(repository.findAllByUserIdWithMaxPrice(20, maxPrice, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserIdWithMinPrice = reservationService.getAllReservationsByUserId(20, null, maxPrice, pageable);
-        assertNotNull(allReservationsByUserIdWithMinPrice);
-        assertEquals(2, allReservationsByUserIdWithMinPrice.content().size());
+        assertNotNull(result);
+        assertEquals(2, result.content().size());
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithMaxPrice(20, maxPrice, pageable);
+        verify(repository).findAllByUserIdWithMaxPrice(20, maxPrice, PAGEABLE);
         verify(repository, never()).findAllByUserIdWithMinPriceAndMaxPrice(any(), any(), any(), any());
         verify(repository, never()).findAllByUserIdWithMinPrice(any(), any(), any());
         verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByUserId_shouldReturnUserReservations_withMaxPriceAndMinPrice(){
-        Double minPrice = 100.0;
-        Double maxPrice = 10000.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByUserId_shouldReturnUserReservations_withMaxPriceAndMinPrice() {
+        BigDecimal minPrice = bd(100.0);
+        BigDecimal maxPrice = bd(10000.0);
+        User authenticatedUser = user(20, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(30, 2000.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        Resource resource = Resource.builder()
-                .id(30)
-                .price(2000.0)
-                .resourceName("iPhone")
-                .build();
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithMinPriceAndMaxPrice(20, minPrice, maxPrice, PAGEABLE)).thenReturn(page);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(1)
-                .user(authenticatedUser)
-                .status(ReservationStatus.PENDING)
-                .resource(resource)
-                .build();
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByUserId(20, minPrice, maxPrice, PAGEABLE);
 
-        Reservation reservation2 = Reservation.builder()
-                .id(2)
-                .status(ReservationStatus.CONFIRMED)
-                .user(authenticatedUser)
-                .resource(resource)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-
-        Page<Reservation> reservationPage = new PageImpl<>(
-                List.of(reservation1, reservation2),
-                pageable,
-                2
-        );
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        when(repository.findAllByUserIdWithMinPriceAndMaxPrice(20, minPrice, maxPrice, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserIdWithMinPrice = reservationService.getAllReservationsByUserId(20, minPrice, maxPrice, pageable);
-        assertNotNull(allReservationsByUserIdWithMinPrice);
-        assertEquals(2, allReservationsByUserIdWithMinPrice.content().size());
+        assertNotNull(result);
+        assertEquals(2, result.content().size());
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithMinPriceAndMaxPrice(20, minPrice, maxPrice, pageable);
+        verify(repository).findAllByUserIdWithMinPriceAndMaxPrice(20, minPrice, maxPrice, PAGEABLE);
         verify(repository, never()).findAllByUserIdWithMinPrice(any(), any(), any());
         verify(repository, never()).findAllByUserIdWithMaxPrice(any(), any(), any());
         verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByUserId_shouldThrowException_whenMinPriceGreaterThanMaxPrice(){
-        Double minPrice = 20000.0;
-        Double maxPrice = 10000.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByUserId_shouldThrowException_whenMinPriceGreaterThanMaxPrice() {
+        assertInvalidPriceForUserReservations(bd(20000.0), bd(10000.0));
+    }
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+    @Test
+    void getReservationByUserId_shouldThrowException_whenMinPriceIsNegative() {
+        assertInvalidPriceForUserReservations(bd(-20000.0), null);
+    }
 
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+    @Test
+    void getReservationByUserId_shouldThrowException_whenMaxPriceIsNegative() {
+        assertInvalidPriceForUserReservations(null, bd(-10000.0));
+    }
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserId(20, minPrice, maxPrice, Pageable.unpaged())
-        );
+    private void assertInvalidPriceForUserReservations(BigDecimal minPrice, BigDecimal maxPrice) {
+        User authenticatedUser = user(20, "user@gmail.com");
+
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> reservationService.getAllReservationsByUserId(20, minPrice, maxPrice, Pageable.unpaged()));
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
@@ -1573,512 +775,431 @@ public class ReservationServiceImplTest {
         verify(repository, never()).findAllByUserIdWithMinPrice(any(), any(), any());
         verify(repository, never()).findAllByUserIdWithMaxPrice(any(), any(), any());
         verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getReservationByUserId_shouldThrowException_whenMinPriceIsNegative(){
-        Double minPrice = -20000.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getReservationByUserId_shouldThrowException_AuthenticationCredentialsNotFoundException() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class,
+                () -> reservationService.getAllReservationsByUserId(1, null, null, Pageable.unpaged()));
+    }
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+    @Test
+    void getReservationByUserId_shouldThrowException_UserDoesNotExistException() {
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.empty());
 
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        assertThrows(UserDoesNotExistException.class,
+                () -> reservationService.getAllReservationsByUserId(1, null, null, Pageable.unpaged()));
+    }
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserId(20, minPrice, null, Pageable.unpaged())
-        );
+    // ------------------------------------------------------------------
+    // getAllReservationsByUserWithStatus
+    // ------------------------------------------------------------------
+
+    @Test
+    void getAllReservationsByUserWithStatus_shouldGetAllUserReservationsByUserWithStatus() {
+        User authenticatedUser = user(2, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(5),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
+
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserWithStatus(2, ReservationStatus.PENDING, PAGEABLE)).thenReturn(page);
+
+        PageResponse<ReservationResponse> result = reservationService
+                .getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), null, null, PAGEABLE);
+
+        assertUserStatusPage(page, result);
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository, never()).findAllByUserIdWithMinPriceAndMaxPrice(any(), any(), any(), any());
-        verify(repository, never()).findAllByUserIdWithMinPrice(any(), any(), any());
-        verify(repository, never()).findAllByUserIdWithMaxPrice(any(), any(), any());
-        verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByUserWithStatus(2, ReservationStatus.PENDING, PAGEABLE);
     }
 
-
     @Test
-    void getReservationByUserId_shouldThrowException_whenMaxPriceIsNegative(){
-        Double maxPrice = -10000.0;
-        User authenticatedUser = User.builder()
-                .id(20)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMaxPriceAndMinPrice() {
+        BigDecimal minPrice = bd(1000.0);
+        BigDecimal maxPrice = bd(20000.0);
+        User authenticatedUser = user(2, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(5),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithStatusBetweenMinPriceAndMaxPrice(
+                2, ReservationStatus.PENDING, minPrice, maxPrice, PAGEABLE)).thenReturn(page);
 
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        PageResponse<ReservationResponse> result = reservationService
+                .getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), minPrice, maxPrice, PAGEABLE);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserId(20, null, maxPrice, Pageable.unpaged())
-        );
+        assertUserStatusPage(page, result);
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository, never()).findAllByUserIdWithMinPriceAndMaxPrice(any(), any(), any(), any());
-        verify(repository, never()).findAllByUserIdWithMinPrice(any(), any(), any());
-        verify(repository, never()).findAllByUserIdWithMaxPrice(any(), any(), any());
-        verify(repository, never()).findAllByUserId(any(), any());
-
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByUserIdWithStatusBetweenMinPriceAndMaxPrice(
+                2, ReservationStatus.PENDING, minPrice, maxPrice, PAGEABLE);
     }
 
     @Test
-    void getReservationByUserId_shouldThrowException_AuthenticationCredentialsNotFoundException(){
-        authentication = null;
-        SecurityContextHolder.getContext()
-                        .setAuthentication(authentication);
-        assertThrows(
-                AuthenticationCredentialsNotFoundException.class,
-                ()-> reservationService.getAllReservationsByUserId(1, null, null, Pageable.unpaged())
-        );
+    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMinPrice() {
+        BigDecimal minPrice = bd(1000.0);
+        User authenticatedUser = user(2, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(5),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        SecurityContextHolder.clearContext();
-    }
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithStatusAndMinPrice(2, ReservationStatus.PENDING, minPrice, PAGEABLE))
+                .thenReturn(page);
 
-    @Test
-    void getReservationByUserId_shouldThrowException_UserDoesNotExistException(){
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.empty());
-        assertThrows(
-                UserDoesNotExistException.class,
-                ()-> reservationService.getAllReservationsByUserId(1, null, null, Pageable.unpaged())
-        );
+        PageResponse<ReservationResponse> result = reservationService
+                .getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), minPrice, null, PAGEABLE);
 
-        SecurityContextHolder.clearContext();
-    }
-
-    @Test
-    void getAllReservationsByUserWithStatus_shouldGetAllUserReservationsByUserWithStatus(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
-
-        Resource resource = Resource.builder()
-                .id(5)
-                .build();
-
-        Reservation reservation1 = Reservation.builder()
-                .id(3)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(4)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-        when(repository.findAllByUserWithStatus(2, ReservationStatus.PENDING, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserWithStatus = reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), null, null, pageable);
-        assertNotNull(allReservationsByUserWithStatus);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservationsByUserWithStatus.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservationsByUserWithStatus.content().getLast().getResource().getId());
-        assertEquals(reservationPage.getContent().getFirst().getStatus().toString(), allReservationsByUserWithStatus.content().getFirst().getStatus());
-
+        assertUserStatusPage(page, result);
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserWithStatus(2, ReservationStatus.PENDING, pageable);
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByUserIdWithStatusAndMinPrice(2, ReservationStatus.PENDING, minPrice, PAGEABLE);
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMaxPriceAndMinPrice(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMaxPrice() {
+        BigDecimal maxPrice = bd(1000.0);
+        User authenticatedUser = user(2, "user@gmail.com");
+        Page<Reservation> page = reservationPage(authenticatedUser, resource(5),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        Double minPrice = 1000.0;
-        Double maxPrice = 20000.0;
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+        when(repository.findAllByUserIdWithStatusAndMaxPrice(2, ReservationStatus.PENDING, maxPrice, PAGEABLE))
+                .thenReturn(page);
 
-        Resource resource = Resource.builder()
-                .id(5)
-                .build();
+        PageResponse<ReservationResponse> result = reservationService
+                .getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), null, maxPrice, PAGEABLE);
 
-        Reservation reservation1 = Reservation.builder()
-                .id(3)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(4)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-        when(repository.findAllByUserIdWithStatusBetweenMinPriceAndMaxPrice(2, ReservationStatus.PENDING, minPrice, maxPrice, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserWithStatus = reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), minPrice, maxPrice, pageable);
-        assertNotNull(allReservationsByUserWithStatus);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservationsByUserWithStatus.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservationsByUserWithStatus.content().getLast().getResource().getId());
-        assertEquals(reservationPage.getContent().getFirst().getStatus().toString(), allReservationsByUserWithStatus.content().getFirst().getStatus());
+        assertUserStatusPage(page, result);
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithStatusBetweenMinPriceAndMaxPrice(2, ReservationStatus.PENDING, minPrice, maxPrice, pageable);
-        SecurityContextHolder.clearContext();
+        verify(repository).findAllByUserIdWithStatusAndMaxPrice(2, ReservationStatus.PENDING, maxPrice, PAGEABLE);
+    }
+
+    private void assertUserStatusPage(Page<Reservation> expected, PageResponse<ReservationResponse> actual) {
+        assertNotNull(actual);
+        assertEquals(expected.getContent().getFirst().getUser().getId(), actual.content().getFirst().getUser().getId());
+        assertEquals(expected.getContent().getLast().getResource().getId(), actual.content().getLast().getResource().getId());
+        assertEquals(expected.getContent().getFirst().getStatus().toString(), actual.content().getFirst().getStatus());
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMinPrice(){
-        Double minPrice = 1000.0;
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByUserWithStatus_shouldThrowException_whenMinPriceGreaterThanMaxPrice() {
+        assertUserWithStatusFailsForAuthenticatedUser(IllegalArgumentException.class, 2,
+                ReservationStatus.PENDING.name(), bd(10000.0), bd(2000.0));
+    }
 
-        Resource resource = Resource.builder()
-                .id(5)
-                .build();
+    @Test
+    void getAllReservationsByUserWithStatus_shouldThrowException_whenMinPriceIsNegative() {
+        assertUserWithStatusFailsForAuthenticatedUser(IllegalArgumentException.class, 2,
+                ReservationStatus.PENDING.name(), bd(-10000.0), null);
+    }
 
-        Reservation reservation1 = Reservation.builder()
-                .id(3)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
+    @Test
+    void getAllReservationsByUserWithStatus_shouldThrowException_whenMaxPriceIsNegative() {
+        assertUserWithStatusFailsForAuthenticatedUser(IllegalArgumentException.class, 2,
+                ReservationStatus.PENDING.name(), null, bd(-200.0));
+    }
 
-        Reservation reservation2 = Reservation.builder()
-                .id(4)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
+    @Test
+    void getAllReservationsByUserWithStatus_shouldThrowException_AuthorizationDeniedException() {
+        // authenticated user has id 2 but asks for the reservations of user 3
+        assertUserWithStatusFailsForAuthenticatedUser(AuthorizationDeniedException.class, 3,
+                ReservationStatus.PENDING.name(), bd(200.0), bd(400.0));
+    }
 
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
+    @Test
+    void getAllReservationsByUserWithStatus_shouldThrowException_InvalidStatusException() {
+        assertUserWithStatusFailsForAuthenticatedUser(InvalidStatusException.class, 2,
+                "COMPLETED", bd(200.0), bd(400.0));
+    }
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-        when(repository.findAllByUserIdWithStatusAndMinPrice(2, ReservationStatus.PENDING, minPrice, pageable))
-                .thenReturn(reservationPage);
+    /** Authenticated user is always id=2 / user@gmail.com. */
+    private void assertUserWithStatusFailsForAuthenticatedUser(Class<? extends Throwable> expected, int userId,
+                                                               String status, BigDecimal minPrice, BigDecimal maxPrice) {
+        User authenticatedUser = user(2, "user@gmail.com");
 
-        PageResponse<ReservationResponse> allReservationsByUserWithStatus = reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), minPrice, null, pageable);
-        assertNotNull(allReservationsByUserWithStatus);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservationsByUserWithStatus.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservationsByUserWithStatus.content().getLast().getResource().getId());
-        assertEquals(reservationPage.getContent().getFirst().getStatus().toString(), allReservationsByUserWithStatus.content().getFirst().getStatus());
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.of(authenticatedUser));
+
+        assertThrows(expected, () -> reservationService
+                .getAllReservationsByUserWithStatus(userId, status, minPrice, maxPrice, Pageable.unpaged()));
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithStatusAndMinPrice(2, ReservationStatus.PENDING, minPrice, pageable);
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldReturnAllUserReservations_ByStatusWithMaxPrice(){
-        Double maxPrice = 1000.0;
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByUserWithStatus_shouldThrowException_UserDoesNotExistException() {
+        authenticateWithEmail("user@gmail.com");
+        when(userRepository.findByEmail("user@gmail.com")).thenReturn(Optional.empty());
 
-        Resource resource = Resource.builder()
-                .id(5)
-                .build();
-
-        Reservation reservation1 = Reservation.builder()
-                .id(3)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Reservation reservation2 = Reservation.builder()
-                .id(4)
-                .user(authenticatedUser)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
-
-        Pageable pageable = PageRequest.of(0, 2);
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-        when(repository.findAllByUserIdWithStatusAndMaxPrice(2, ReservationStatus.PENDING, maxPrice, pageable))
-                .thenReturn(reservationPage);
-
-        PageResponse<ReservationResponse> allReservationsByUserWithStatus = reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), null, maxPrice, pageable);
-        assertNotNull(allReservationsByUserWithStatus);
-        assertEquals(reservationPage.getContent().getFirst().getUser().getId(), allReservationsByUserWithStatus.content().getFirst().getUser().getId());
-        assertEquals(reservationPage.getContent().getLast().getResource().getId(), allReservationsByUserWithStatus.content().getLast().getResource().getId());
-        assertEquals(reservationPage.getContent().getFirst().getStatus().toString(), allReservationsByUserWithStatus.content().getFirst().getStatus());
+        assertThrows(UserDoesNotExistException.class, () -> reservationService
+                .getAllReservationsByUserWithStatus(2, ReservationStatus.CONFIRMED.name(), bd(200.0), bd(400.0),
+                        Pageable.unpaged()));
 
         verify(authentication).getName();
         verify(userRepository).findByEmail("user@gmail.com");
-        verify(repository).findAllByUserIdWithStatusAndMaxPrice(2, ReservationStatus.PENDING, maxPrice, pageable);
-        SecurityContextHolder.clearContext();
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_whenMinPriceGreaterThanMaxPrice(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByUserWithStatus_shouldThrowException_whenUserIsNotAuthenticated() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class, () -> reservationService
+                .getAllReservationsByUserWithStatus(2, "CONFIRMED", null, null, Pageable.unpaged()));
+    }
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+    // ------------------------------------------------------------------
+    // getAllReservationsByResourceId (admin only)
+    // ------------------------------------------------------------------
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), 10000.0, 2000.0, Pageable.unpaged())
-        );
+    @Test
+    void getAllReservationsByResource_shouldReturnAllReservationsByResource() {
+        Page<Reservation> page = reservationPage(user(1, null), resource(2),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        authenticateAsAdmin();
+        when(repository.findAllByResourceId(2, PAGEABLE)).thenReturn(page);
+
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByResourceId(2, null, null, PAGEABLE);
+
+        assertNotNull(result);
+        assertEquals(page.getContent().getFirst().getResource().getId(), result.content().getFirst().getResource().getId());
+
+        verify(repository).findAllByResourceId(2, PAGEABLE);
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_whenMinPriceIsNegative(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByResource_shouldReturnAllReservationsMadeForAResourceBetweenMinPriceAndMaxPrice() {
+        BigDecimal minPrice = bd(100.0);
+        BigDecimal maxPrice = bd(20000.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1, 200.0),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithMinPriceAndMaxPrice(1, minPrice, maxPrice, PAGEABLE)).thenReturn(page);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), -10000.0, null, Pageable.unpaged())
-        );
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByResourceId(1, minPrice, maxPrice, PAGEABLE);
 
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        assertResourcePage(page, result);
+
+        verify(repository).findAllByResourceIdWithMinPriceAndMaxPrice(1, minPrice, maxPrice, PAGEABLE);
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_whenMaxPriceIsNegative(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByResource_shouldReturnAllReservationsMadeForAResourceWithMinPrice() {
+        BigDecimal minPrice = bd(100.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1, 200.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithMinPrice(1, minPrice, PAGEABLE)).thenReturn(page);
 
-        assertThrows(
-                IllegalArgumentException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.PENDING.name(), null, -200.0, Pageable.unpaged())
-        );
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByResourceId(1, minPrice, null, PAGEABLE);
 
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        assertResourcePage(page, result);
+
+        verify(repository).findAllByResourceIdWithMinPrice(1, minPrice, PAGEABLE);
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_AuthorizationDeniedException(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByResource_shouldReturnAllReservationsMadeForAResourceWithMaxPrice() {
+        BigDecimal maxPrice = bd(10000.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1, 200.0),
+                ReservationStatus.PENDING, ReservationStatus.CONFIRMED);
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithMaxPrice(1, maxPrice, PAGEABLE)).thenReturn(page);
 
-        assertThrows(
-                AuthorizationDeniedException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(3, ReservationStatus.PENDING.name(), 200.0, 400.0, Pageable.unpaged())
-        );
+        PageResponse<ReservationResponse> result =
+                reservationService.getAllReservationsByResourceId(1, null, maxPrice, PAGEABLE);
 
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        assertResourcePage(page, result);
+
+        verify(repository).findAllByResourceIdWithMaxPrice(1, maxPrice, PAGEABLE);
+    }
+
+    private void assertResourcePage(Page<Reservation> expected, PageResponse<ReservationResponse> actual) {
+        assertNotNull(actual);
+        assertEquals(expected.getContent().getFirst().getUser().getId(), actual.content().getFirst().getUser().getId());
+        assertEquals(expected.getTotalElements(), actual.totalElements());
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_InvalidStatusException(){
-        User authenticatedUser = User.builder()
-                .id(2)
-                .role(UserRole.USER)
-                .email("user@gmail.com")
-                .build();
+    void getAllReservationsByResourceId_shouldThrowException_whenMinPriceGreaterThanMaxPrice() {
+        authenticateAsAdmin();
 
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.of(authenticatedUser));
-
-        assertThrows(
-                InvalidStatusException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, "COMPLETED", 200.0, 400.0, Pageable.unpaged())
-        );
-
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        assertThrows(IllegalArgumentException.class, () -> reservationService
+                .getAllReservationsByResourceId(1, bd(10000.0), bd(1000.0), Pageable.unpaged()));
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_UserDoesNotExistException(){
-        when(authentication.getName())
-                .thenReturn("user@gmail.com");
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(userRepository.findByEmail("user@gmail.com"))
-                .thenReturn(Optional.empty());
+    void getAllReservationsByResourceId_shouldThrowException_whenMinPriceIsNegative() {
+        authenticateAsAdmin();
 
-        assertThrows(
-                UserDoesNotExistException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, ReservationStatus.CONFIRMED.name(), 200.0, 400.0, Pageable.unpaged())
-        );
-
-        verify(authentication).getName();
-        verify(userRepository).findByEmail("user@gmail.com");
-        SecurityContextHolder.clearContext();
+        assertThrows(IllegalArgumentException.class, () -> reservationService
+                .getAllReservationsByResourceId(1, bd(-10000.0), null, Pageable.unpaged()));
     }
 
     @Test
-    void getAllReservationsByUserWithStatus_shouldThrowException_whenUserIsNotAuthenticated(){
-        authentication = null;
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
+    void getAllReservationsByResourceId_shouldThrowException_whenMaxPriceIsNegative() {
+        authenticateAsAdmin();
 
-        assertThrows(
-                AuthenticationCredentialsNotFoundException.class,
-                ()-> reservationService.getAllReservationsByUserWithStatus(2, "CONFIRMED", null, null, Pageable.unpaged())
-        );
-        SecurityContextHolder.clearContext();
+        assertThrows(IllegalArgumentException.class, () -> reservationService
+                .getAllReservationsByResourceId(1, null, bd(-10000.0), Pageable.unpaged()));
     }
 
     @Test
-    void getAllReservationsByResource_shouldReturnAllReservationsByResource(){
-        Pageable pageable = PageRequest.of(0, 2);
+    void getReservationsByResourceId_shouldThrowException_whenAuthenticatedUserIsNotAdmin() {
+        authenticateAsUser();
 
-        User user = User.builder()
-                .id(1)
-                .build();
+        assertThrows(AuthorizationDeniedException.class, () -> reservationService
+                .getAllReservationsByResourceId(1, null, null, Pageable.unpaged()));
+    }
 
-        Resource resource = Resource.builder()
-                .id(2)
-                .build();
+    @Test
+    void getAllReservationsByResourceId_shouldThrowException_whenUserIsNotAuthenticated() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class, () -> reservationService
+                .getAllReservationsByResourceId(1, null, null, Pageable.unpaged()));
+    }
 
-        Reservation reservation1 = Reservation.builder()
-                .id(3)
-                .user(user)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
+    // ------------------------------------------------------------------
+    // getAllReservationsByResourceWithStatus (admin only)
+    // ------------------------------------------------------------------
 
-        Reservation reservation2 = Reservation.builder()
-                .id(4)
-                .user(user)
-                .resource(resource)
-                .status(ReservationStatus.PENDING)
-                .build();
+    @Test
+    void getAllReservationsByResourceWithStatus_shouldReturnAllResourceReservationsWithStatus() {
+        Page<Reservation> page = reservationPage(user(1, null), resource(1),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
 
-        Page<Reservation> reservationPage = new PageImpl<>(List.of(reservation1, reservation2), pageable, 2);
-        SecurityContextHolder.getContext()
-                .setAuthentication(authentication);
-        when(authentication.getAuthorities())
-                .then(
-                        (auth)-> List.of(
-                                new SimpleGrantedAuthority("ROLE_ADMIN")
-                        )
-                );
-        when(repository.findAllByResourceId(2, pageable))
-                .thenReturn(reservationPage);
+        authenticateAsAdmin();
+        when(repository.findAllByResourceWithStatus(1, ReservationStatus.PENDING, PAGEABLE)).thenReturn(page);
 
-        PageResponse<ReservationResponse> allReservationsByResourceId = reservationService.getAllReservationsByResourceId(2, null, null, pageable);
-        assertNotNull(allReservationsByResourceId);
-        assertEquals(reservationPage.getContent().getFirst().getResource().getId(), allReservationsByResourceId.content().getFirst().getResource().getId());
+        PageResponse<ReservationResponse> result = reservationService
+                .getAllReservationsByResourceWithStatus(1, ReservationStatus.PENDING.name(), null, null, PAGEABLE);
 
-        verify(repository).findAllByResourceId(2,pageable);
-        SecurityContextHolder.clearContext();
+        assertResourceStatusPage(page, result);
+
+        verify(repository).findAllByResourceWithStatus(1, ReservationStatus.PENDING, PAGEABLE);
+    }
+
+    @Test
+    void getAllReservationsByResourceWithStatus_shouldReturnAllResourceReservationsWithStatusBetweenMinPriceAndMaxPrice() {
+        BigDecimal minPrice = bd(100.0);
+        BigDecimal maxPrice = bd(1000.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
+
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithStatusBetweenMinPriceAndMaxPrice(
+                1, ReservationStatus.PENDING, minPrice, maxPrice, PAGEABLE)).thenReturn(page);
+
+        PageResponse<ReservationResponse> result = reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), minPrice, maxPrice, PAGEABLE);
+
+        assertResourceStatusPage(page, result);
+
+        verify(repository).findAllByResourceIdWithStatusBetweenMinPriceAndMaxPrice(
+                1, ReservationStatus.PENDING, minPrice, maxPrice, PAGEABLE);
+    }
+
+    @Test
+    void getAllReservationsByResourceWithStatus_shouldReturnAllResourceReservationsWithStatusWithMinPrice() {
+        BigDecimal minPrice = bd(100.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
+
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithStatusAndMinPrice(1, ReservationStatus.PENDING, minPrice, PAGEABLE))
+                .thenReturn(page);
+
+        PageResponse<ReservationResponse> result = reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), minPrice, null, PAGEABLE);
+
+        assertResourceStatusPage(page, result);
+
+        verify(repository).findAllByResourceIdWithStatusAndMinPrice(1, ReservationStatus.PENDING, minPrice, PAGEABLE);
+    }
+
+    @Test
+    void getAllReservationsByResourceWithStatus_shouldReturnAllResourceReservationsWithStatusAndMaxPrice() {
+        BigDecimal maxPrice = bd(10000.0);
+        Page<Reservation> page = reservationPage(user(1, null), resource(1),
+                ReservationStatus.PENDING, ReservationStatus.PENDING);
+
+        authenticateAsAdmin();
+        when(repository.findAllByResourceIdWithStatusAndMaxPrice(1, ReservationStatus.PENDING, maxPrice, PAGEABLE))
+                .thenReturn(page);
+
+        PageResponse<ReservationResponse> result = reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), null, maxPrice, PAGEABLE);
+
+        assertResourceStatusPage(page, result);
+
+        verify(repository).findAllByResourceIdWithStatusAndMaxPrice(1, ReservationStatus.PENDING, maxPrice, PAGEABLE);
+    }
+
+    private void assertResourceStatusPage(Page<Reservation> expected, PageResponse<ReservationResponse> actual) {
+        assertNotNull(actual);
+        assertEquals(expected.getTotalPages(), actual.totalPages());
+        assertEquals(expected.getContent().getFirst().getResource().getId(), actual.content().getFirst().getResource().getId());
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenMinPriceIsGreaterThanMaxPrice() {
+        authenticateAsAdmin();
+
+        assertThrows(IllegalArgumentException.class, () -> reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), bd(3000.0), bd(200.0), Pageable.unpaged()));
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenMinPriceIsNegative() {
+        authenticateAsAdmin();
+
+        assertThrows(IllegalArgumentException.class, () -> reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), bd(-3000.0), bd(200.0), Pageable.unpaged()));
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenMaxPriceIsNegative() {
+        authenticateAsAdmin();
+
+        assertThrows(IllegalArgumentException.class, () -> reservationService.getAllReservationsByResourceWithStatus(
+                1, ReservationStatus.PENDING.name(), bd(10.0), bd(-200.0), Pageable.unpaged()));
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenStatusIsInvalid() {
+        authenticateAsAdmin();
+
+        assertThrows(InvalidStatusException.class, () -> reservationService
+                .getAllReservationsByResourceWithStatus(1, "COMPLETED", null, null, Pageable.unpaged()));
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenUserIsNotAdmin() {
+        authenticateAsUser();
+
+        assertThrows(AuthorizationDeniedException.class, () -> reservationService
+                .getAllReservationsByResourceWithStatus(1, ReservationStatus.CONFIRMED.name(), null, null,
+                        Pageable.unpaged()));
+    }
+
+    @Test
+    void getAllReservationsByResourceIdWithStatus_shouldThrowException_whenUserIsNotAuthenticated() {
+        assertThrows(AuthenticationCredentialsNotFoundException.class, () -> reservationService
+                .getAllReservationsByResourceWithStatus(1, ReservationStatus.CONFIRMED.name(), null, null,
+                        Pageable.unpaged()));
     }
 }
-
-

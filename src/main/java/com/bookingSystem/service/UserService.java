@@ -1,8 +1,6 @@
 package com.bookingSystem.service;
 
-import com.bookingSystem.dto.RegisterRequest;
-import com.bookingSystem.dto.UserRequest;
-import com.bookingSystem.dto.UserResponse;
+import com.bookingSystem.dto.*;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -15,4 +13,6 @@ public interface UserService {
     UserResponse updateUserDetailsById(Integer id, UserRequest request);
     List<UserResponse> getAllUsers();
     UserResponse getUserByEmail(String email);
+
+    LoginResponse loginUser(LoginRequest request);
 }

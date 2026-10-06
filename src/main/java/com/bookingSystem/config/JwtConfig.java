@@ -1,6 +1,7 @@
 package com.bookingSystem.config;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,12 +13,22 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
 
 @Configuration
 public class JwtConfig
 {
     @Value("${jwt.secret}")
     private String secret;
+
+    @PostConstruct
+    public void validateSecret() {
+        if (secret.getBytes(StandardCharsets.UTF_8).length < 32) {
+            throw new IllegalStateException(
+                    "JWT secret must be at least 32 bytes for HS256"
+            );
+        }
+    }
 
     @Bean
     public JwtDecoder jwtDecoder(){

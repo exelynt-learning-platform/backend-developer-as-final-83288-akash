@@ -3,6 +3,7 @@ package com.bookingSystem.exception;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
@@ -68,6 +69,22 @@ public class GlobalExceptionHandler
         problemDetail.setTitle("Authentication Failure");
         problemDetail.setProperty("timeStamp", Instant.now());
         return new ResponseEntity<>(problemDetail, HttpStatus.UNAUTHORIZED);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ProblemDetail> handleHttpMessageNotReadable(HttpMessageNotReadableException exception) {
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid JSON request");
+        problemDetail.setTitle("Bad Request");
+        problemDetail.setProperty("timeStamp", Instant.now());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(problemDetail);
+    }
+
+    @ExceptionHandler(UserIdConflictException.class)
+    public ResponseEntity<ProblemDetail> userIdConflictExceptionHandler(UserIdConflictException exception){
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
+        problemDetail.setTitle("User id conflict");
+        problemDetail.setProperty("timeStamp", Instant.now());
+        return new ResponseEntity<>(problemDetail, HttpStatus.CONFLICT);
     }
 
     @ExceptionHandler(AuthorizationDeniedException.class)

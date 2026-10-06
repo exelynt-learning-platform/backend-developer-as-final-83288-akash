@@ -14,14 +14,12 @@ import java.util.Optional;
 @RequiredArgsConstructor
 @Configuration
 public class CommandLineRunnerConfig {
-
     public final UserRepository repository;
     public final PasswordEncoder passwordEncoder;
 
     @Bean
     public CommandLineRunner createADMIN(){
         return args ->{
-
             Optional<User> optional = this.repository.findByRole(UserRole.ADMIN);
             if (optional.isEmpty()){
                 User user = new User();
@@ -29,10 +27,8 @@ public class CommandLineRunnerConfig {
                 user.setPassword(passwordEncoder.encode("akash@123"));
                 user.setEmail("akash@gmail.com");
                 user.setRole(UserRole.ADMIN);
-                User ADMIN = this.repository.save(user);
-                System.out.println("Saved user ad ADMIN: " + ADMIN);
+                this.repository.save(user);
             }
-            optional.ifPresent(user -> System.out.println("Existing ADMIN: " + user.getEmail()));
         };
     }
 }

@@ -8,15 +8,6 @@ import java.util.List;
 
 public class ModelMapper
 {
-    public static User mapToUser(UserRequest request){
-        User user = new User();
-        user.setUserName(request.getUserName());
-        user.setEmail(request.getEmail());
-        String role = request.getRole();
-        user.setRole(UserRole.valueOf(role));
-        return user;
-    }
-
     public static UserResponse mapToUserResponse(User user){
         UserResponse response = new UserResponse();
         response.setId(user.getId());

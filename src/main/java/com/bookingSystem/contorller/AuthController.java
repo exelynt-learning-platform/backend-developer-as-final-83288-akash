@@ -1,79 +1,97 @@
 package com.bookingSystem.contorller;
 
 import com.bookingSystem.dto.LoginRequest;
+import com.bookingSystem.dto.LoginResponse;
 import com.bookingSystem.dto.RegisterRequest;
 import com.bookingSystem.dto.UserResponse;
 import com.bookingSystem.service.UserService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.time.Instant;
-
+@Tag(
+        name = "Authentication",
+        description = "APIs for user authentication and registration."
+)
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api/auth")
 @Slf4j
 public class AuthController {
-    private final AuthenticationManager authenticationManager;
+
     private final UserService userService;
-    private final JwtEncoder jwtEncoder;
 
+
+    @Operation(
+            summary = "User login",
+            description = "Authenticates a user using their email and password " +
+                    "and returns a JWT access token."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "200",
+                    description = "Login successful. JWT access token returned."
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid login request"
+            ),
+            @ApiResponse(
+                    responseCode = "401",
+                    description = "Invalid email or password"
+            )
+    })
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest request)
-    {
-        Authentication authentication = authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+    public ResponseEntity<?> login(
+            @RequestBody LoginRequest request) {
 
-        String username = authentication.getName();
-        String role = authentication.getAuthorities()
-                .iterator()
-                .next()
-                .getAuthority();
+        LoginResponse response =
+                this.userService.loginUser(request);
 
-        if (role != null) {
-            Instant now = Instant.now();
-            // PAYLOAD
-            JwtClaimsSet claims = JwtClaimsSet.builder()
-                    .subject(username)
-                    .claim("role", role.replace("ROLE_",""))
-                    .issuedAt(now)
-                    .expiresAt(now.plusSeconds(3600))
-                    .build();
-
-            // HEADER
-            JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-
-            // SIGNATURE
-            String token = jwtEncoder
-                    .encode(JwtEncoderParameters.from(header, claims))
-                    .getTokenValue();
-            return ResponseEntity.ok(token);
-        }
-        throw new RuntimeException("Role is null!");
+        return ResponseEntity.ok(response);
     }
 
+
+    @Operation(
+            summary = "Register a new user",
+            description = "Creates a new user account. " +
+                    "The user role is assigned by the application and " +
+                    "cannot be supplied through the registration request."
+    )
+    @ApiResponses({
+            @ApiResponse(
+                    responseCode = "201",
+                    description = "User registered successfully"
+            ),
+            @ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid registration request"
+            ),
+            @ApiResponse(
+                    responseCode = "409",
+                    description = "User with the provided email already exists"
+            )
+    })
     @PostMapping("/register")
-    public ResponseEntity<UserResponse> addUser(@Valid @RequestBody RegisterRequest request){
-        UserResponse response = this.userService.addUser(request);
-        return new ResponseEntity<>(response, HttpStatus.CREATED);
+    public ResponseEntity<UserResponse> addUser(
+            @Valid @RequestBody RegisterRequest request) {
+
+        UserResponse response =
+                this.userService.addUser(request);
+
+        return new ResponseEntity<>(
+                response,
+                HttpStatus.CREATED
+        );
     }
 }

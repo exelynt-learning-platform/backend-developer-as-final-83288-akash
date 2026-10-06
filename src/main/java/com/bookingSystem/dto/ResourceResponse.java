@@ -1,6 +1,9 @@
 package com.bookingSystem.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.*;
+
+import java.math.BigDecimal;
 
 @NoArgsConstructor
 @AllArgsConstructor
@@ -8,9 +11,24 @@ import lombok.*;
 @Setter
 @ToString
 @Builder
-public class ResourceResponse
-{
+@Schema(description = "Response containing booking resource details")
+public class ResourceResponse {
+
+    @Schema(
+            description = "Unique identifier of the resource",
+            example = "4"
+    )
     private Integer id;
+
+    @Schema(
+            description = "Name of the booking resource",
+            example = "Conference Room A"
+    )
     private String resourceName;
-    private Double price;
+
+    @Schema(
+            description = "Price of the resource",
+            example = "150000.00"
+    )
+    private BigDecimal price;
 }
