@@ -89,8 +89,8 @@ public class SecurityConfig
 
                         // Reservation Management
                         .requestMatchers(
-                                HttpMethod.GET,
-                                "/api/booking/reservations"
+                                  HttpMethod.GET,
+                                  "/api/booking/reservations"
                         ).hasRole("ADMIN")
 
                         .requestMatchers(
@@ -100,8 +100,23 @@ public class SecurityConfig
 
                         .requestMatchers(
                                 HttpMethod.GET,
-                                "/api/booking/reservations/users/**"
+                                "/api/booking/reservations/users/*"
                         ).hasAnyRole("ADMIN", "USER")
+
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/booking/reservations/resources/*"
+                        ).hasRole("ADMIN")
+
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/booking/reservations/users/*/status/*"
+                        ).hasAnyRole("ADMIN", "USER")
+
+                        .requestMatchers(
+                                HttpMethod.GET,
+                                "/api/booking/reservations/resources/*/status/*"
+                        ).hasRole("ADMIN")
 
                         .requestMatchers(
                                 HttpMethod.POST,
