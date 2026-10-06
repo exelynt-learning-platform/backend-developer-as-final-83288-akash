@@ -1,5 +1,6 @@
 package com.bookingSystem.exception;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import java.time.Instant;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler
 {
     @ExceptionHandler(UserAlreadyExistsException.class)
@@ -137,16 +139,28 @@ public class GlobalExceptionHandler
     }
 
     @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<ProblemDetail> runtimeExceptionHandler(RuntimeException exception){
-        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, exception.getMessage());
+    public ResponseEntity<ProblemDetail> runtimeExceptionHandler(RuntimeException exception) {
+
+        log.error("Unexpected runtime exception", exception);
+
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Internal server error"
+        );
+
         problemDetail.setTitle("Something went wrong");
         problemDetail.setProperty("timeStamp", Instant.now());
+
         return new ResponseEntity<>(problemDetail, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ProblemDetail> globalExceptionHandler(Exception exception){
-        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, exception.getMessage());
+        log.error("Unexpected exception", exception);
+        ProblemDetail problemDetail = ProblemDetail.forStatusAndDetail(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "Internal server error"
+                );
         problemDetail.setTitle("Internal Server Error");
         problemDetail.setProperty("timeStamp", Instant.now());
         return new ResponseEntity<>(problemDetail, HttpStatus.INTERNAL_SERVER_ERROR);
