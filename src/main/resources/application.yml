@@ -32,6 +32,11 @@ springdoc:
 jwt:
   secret: ${SECRET_KEY}
 
+admin:
+  username: ${ADMIN_USERNAME}
+  email: ${ADMIN_EMAIL}
+  password: ${ADMIN_PASSWORD}
+
 logging:
   level:
     org.springframework.security: DEBUG

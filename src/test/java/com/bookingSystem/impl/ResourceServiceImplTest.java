@@ -68,8 +68,7 @@ public class ResourceServiceImplTest {
         SecurityContextHolder.clearContext();
     }
 
-    @
-    Test
+    @Test
     void addResource_shouldThrowException_whenUserIsNotAdmin(){
         SecurityContextHolder.getContext()
                 .setAuthentication(authentication);

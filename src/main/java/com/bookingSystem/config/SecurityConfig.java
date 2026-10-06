@@ -68,7 +68,7 @@ public class SecurityConfig
                                 .requestMatchers(HttpMethod.PUT,
                                         "/api/booking/reservations/*").hasRole("ADMIN")
                                 .requestMatchers(HttpMethod.DELETE,
-                                        "/api/booking/reservation/*").hasRole("ADMIN")
+                                        "/api/booking/reservations/*").hasRole("ADMIN")
                                 .anyRequest().authenticated()))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt
