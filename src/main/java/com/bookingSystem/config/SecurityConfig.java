@@ -21,7 +21,7 @@ public class SecurityConfig
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception{
         http
-                .csrf(csrf -> csrf.disable()
+                .csrf(csrf -> csrf.disable())
                         .authorizeHttpRequests(auth -> auth
                                 .requestMatchers(
                                         "/swagger-ui/**",
@@ -69,7 +69,7 @@ public class SecurityConfig
                                         "/api/booking/reservations/*").hasRole("ADMIN")
                                 .requestMatchers(HttpMethod.DELETE,
                                         "/api/booking/reservations/*").hasRole("ADMIN")
-                                .anyRequest().authenticated()))
+                                .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt
                                 .jwtAuthenticationConverter(jwtAuthenticationConverter)));
