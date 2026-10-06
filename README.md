@@ -1,18 +1,36 @@
-# backend-developer-as-final-83288-akash
-Final Project Assignment - This repository contains the complete final project code and documentation.
-
 # RESTful Resource Booking System
 
-A RESTful Resource Booking System built using Spring Boot, Spring Security, JWT authentication, JPA/Hibernate, and MySQL.
+A RESTful Resource Booking System built with **Spring Boot**, **Spring Security**, **JWT authentication**, **JPA/Hibernate** and **MySQL**.
 
-The system provides role-based access control for administrators and users to manage resources and reservations.
+The system provides role-based access control so that administrators and users can manage resources and reservations.
+
+> Final Project Assignment – this repository contains the complete project code and documentation.
+
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [User Roles](#user-roles)
+- [Authentication](#authentication)
+- [API Endpoints](#api-endpoints)
+- [Reservation Status](#reservation-status)
+- [Pagination, Sorting and Filtering](#pagination-sorting-and-filtering)
+- [Configuration](#configuration)
+- [Running the Application](#running-the-application)
+- [Swagger / OpenAPI Documentation](#swagger--openapi-documentation)
+- [Testing](#testing)
+- [Project Structure](#project-structure)
+- [Security](#security)
+- [License](#license)
 
 ---
 
 ## Features
 
 - JWT-based authentication
-- Role-based authorization using ADMIN and USER roles
+- Role-based authorization using `ADMIN` and `USER` roles
 - User registration and login
 - Resource management
 - Reservation management
@@ -23,8 +41,7 @@ The system provides role-based access control for administrators and users to ma
   - Status
   - Minimum price
   - Maximum price
-- Pagination
-- Sorting
+- Pagination and sorting
 - Request validation
 - Global exception handling
 - Swagger/OpenAPI documentation
@@ -35,19 +52,18 @@ The system provides role-based access control for administrators and users to ma
 
 ## Tech Stack
 
-- Java 21
-- Spring Boot 4.1.1
-- Spring Web MVC
-- Spring Data JPA
-- Hibernate
-- Spring Security
-- JWT
-- MySQL
-- Maven
-- Lombok
-- JUnit 5
-- Mockito
-- Springdoc OpenAPI / Swagger UI
+| Category        | Technology                          |
+|-----------------|-------------------------------------|
+| Language        | Java 21                             |
+| Framework       | Spring Boot 4.1.1                   |
+| Web             | Spring Web MVC                      |
+| Persistence     | Spring Data JPA, Hibernate          |
+| Security        | Spring Security, JWT                |
+| Database        | MySQL                               |
+| Build tool      | Maven                               |
+| Utilities       | Lombok                              |
+| Testing         | JUnit 5, Mockito                    |
+| API docs        | Springdoc OpenAPI / Swagger UI      |
 
 ---
 
@@ -61,7 +77,7 @@ Administrators can:
 - Create, update and delete resources
 - View and manage reservations
 - Update reservation status
-- Access reservation data across users and resources
+- Access reservation data across all users and resources
 
 ### USER
 
@@ -83,60 +99,149 @@ The application uses JWT for authentication.
 
 ```http
 POST /auth/login
+```
 
-Example request:
+Example request body:
+
+```json
 {
   "email": "user@gmail.com",
   "password": "Password@123"
 }
+```
 
-A successful login returns a JWT access token.
-Use the token in subsequent authenticated requests:
+A successful login returns a JWT access token. Send it in the `Authorization` header of every subsequent authenticated request:
+
+```http
 Authorization: Bearer <JWT_TOKEN>
+```
 
+---
 
-Reservation Status
+## API Endpoints
+
+### Authentication
+
+| Method | Endpoint         | Access |
+|--------|------------------|--------|
+| POST   | `/auth/login`    | Public |
+| POST   | `/auth/register` | Public |
+
+### Users
+
+| Method | Endpoint                 | Access       |
+|--------|--------------------------|--------------|
+| GET    | `/api/booking/users`     | ADMIN        |
+| GET    | `/api/booking/users/{id}`| ADMIN / USER |
+| PUT    | `/api/booking/users/{id}`| ADMIN / USER |
+| DELETE | `/api/booking/users/{id}`| ADMIN        |
+
+### Resources
+
+| Method | Endpoint                      | Access       |
+|--------|-------------------------------|--------------|
+| GET    | `/api/booking/resources`      | ADMIN / USER |
+| GET    | `/api/booking/resources/{id}` | ADMIN / USER |
+| POST   | `/api/booking/resources`      | ADMIN        |
+| PUT    | `/api/booking/resources/{id}` | ADMIN        |
+| DELETE | `/api/booking/resources/{id}` | ADMIN        |
+
+### Reservations
+
+| Method | Endpoint                                                        | Access       |
+|--------|-----------------------------------------------------------------|--------------|
+| POST   | `/api/booking/reservations`                                     | ADMIN / USER |
+| GET    | `/api/booking/reservations`                                     | ADMIN        |
+| GET    | `/api/booking/reservations/{id}`                                | ADMIN / USER |
+| PUT    | `/api/booking/reservations/{id}`                                | ADMIN        |
+| DELETE | `/api/booking/reservations/{id}`                                | ADMIN / USER |
+| GET    | `/api/booking/reservations/users/{id}`                          | ADMIN / USER |
+| GET    | `/api/booking/reservations/resources/{id}`                      | ADMIN / USER |
+| GET    | `/api/booking/reservations/users/{id}/status/{status}`          | ADMIN / USER |
+| GET    | `/api/booking/reservations/resources/{id}/status/{status}`      | ADMIN / USER |
+
+> **Note:** For endpoints marked `ADMIN / USER`, a `USER` can only access their own data (ownership checks are enforced). `ADMIN` can access everything.
+
+---
+
+## Reservation Status
+
 Reservations support the following statuses:
-- PENDING
-- CONFIRMED
-- CANCELLED
 
-Pagination, Sorting and Filtering
+| Status      | Meaning                                  |
+|-------------|------------------------------------------|
+| `PENDING`   | Reservation created, awaiting approval   |
+| `CONFIRMED` | Reservation approved                     |
+| `CANCELLED` | Reservation cancelled                    |
+
+---
+
+## Pagination, Sorting and Filtering
+
 Reservation endpoints support pagination and sorting.
-Example:
+
+**Pagination and sorting:**
+
+```http
 GET /api/booking/reservations/users/7?page=0&size=3&sort=resource.price,desc
+```
 
-Price filtering is also supported:
+**Price filtering:**
+
+```http
 GET /api/booking/reservations/users/7?page=0&size=3&minPrice=150000&maxPrice=300000
+```
 
-Sorting follows Spring Data format:
+**Status filtering:**
+
+```http
+GET /api/booking/reservations/users/7/status/CONFIRMED
+```
+
+Sorting follows the Spring Data format:
+
+```text
 sort=property,asc
 sort=property,desc
+```
 
-Example:
-sort=resource.price,desc
+Example: `sort=resource.price,desc`
 
+---
 
-Database Configuration
-The application uses MySQL.
-Create the database:
+## Configuration
+
+### Database
+
+The application uses MySQL. Create the database first:
+
+```sql
 CREATE DATABASE bookingSystemDB;
+```
 
-Database credentials are supplied through environment variables.
+### Environment Variables
 
-Environment Variables
-DB_USERNAME
-DB_PASSWORD
-SECRET_KEY
+Database credentials and the JWT secret are supplied through environment variables.
+
+| Variable      | Description                       |
+|---------------|-----------------------------------|
+| `DB_USERNAME` | MySQL username                    |
+| `DB_PASSWORD` | MySQL password                    |
+| `SECRET_KEY`  | Secret used to sign JWT tokens (256-bit) |
 
 Example:
+
+```bash
 DB_USERNAME=root
 DB_PASSWORD=your_database_password
 SECRET_KEY=your_256_bit_secret_key
+```
 
-Application Configuration
-The application reads database credentials and the JWT secret from environment variables.
-Example configuration:
+### Application Configuration
+
+`src/main/resources/application.yml`:
+
+```yaml
 spring:
   datasource:
     url: jdbc:mysql://localhost:3306/bookingSystemDB
@@ -145,41 +250,68 @@ spring:
 
 jwt:
   secret: ${SECRET_KEY}
+```
 
-  Running the Application
-Prerequisites
+---
+
+## Running the Application
+
+### Prerequisites
+
 Make sure the following are installed:
-- Java 17 or higher
+
+- Java 21
 - Maven
 - MySQL
-Steps
-Clone the repository:
 
-git clone <https://github.com/exelynt-learning-platform/backend-developer-as-final-83288-akash>
+### Steps
 
-Configure the required environment variables.
-Create the MySQL database:
-CREATE DATABASE bookingSystemDB;
+1. Clone the repository:
 
-Run the application:
-mvn spring-boot:run
+   ```bash
+   git clone https://github.com/exelynt-learning-platform/backend-developer-as-final-83288-akash.git
+   cd backend-developer-as-final-83288-akash
+   ```
 
-The application starts on:
-http://localhost:8080
+2. Set the required [environment variables](#environment-variables).
 
-Swagger / OpenAPI Documentation
-Swagger UI is available at:
-http://localhost:8080/swagger-ui/index.html
+3. Create the MySQL database:
 
-OpenAPI specification:
-http://localhost:8080/v3/api-docs
+   ```sql
+   CREATE DATABASE bookingSystemDB;
+   ```
+
+4. Run the application:
+
+   ```bash
+   mvn spring-boot:run
+   ```
+
+The application starts on <http://localhost:8080>.
+
+---
+
+## Swagger / OpenAPI Documentation
+
+| Resource           | URL                                           |
+|--------------------|-----------------------------------------------|
+| Swagger UI         | http://localhost:8080/swagger-ui/index.html   |
+| OpenAPI spec       | http://localhost:8080/v3/api-docs             |
 
 Swagger provides interactive documentation for the available REST APIs.
-For protected endpoints, use the Authorize button and provide:
-Bearer <JWT_TOKEN>
 
-Testing
+For protected endpoints, click the **Authorize** button and provide:
+
+```text
+Bearer <JWT_TOKEN>
+```
+
+---
+
+## Testing
+
 The project includes unit and controller-level tests covering:
+
 - Authentication
 - Authorization
 - User operations
@@ -190,10 +322,17 @@ The project includes unit and controller-level tests covering:
 - Role-based access control
 - Ownership checks
 
-Run the complete test suite using:
-mvn test
+Run the complete test suite:
 
-Project Structure
+```bash
+mvn test
+```
+
+---
+
+## Project Structure
+
+```text
 src
 ├── main
 │   ├── java
@@ -207,22 +346,29 @@ src
 │   │       ├── repository
 │   │       ├── security
 │   │       └── service
-│   │
 │   └── resources
 │       └── application.yml
-│
 └── test
     └── java
+```
 
-    Security
+---
+
+## Security
+
 The application implements:
+
 - JWT authentication
 - Role-based authorization
 - Password hashing using BCrypt
 - Ownership checks for user-specific operations
 - Protected API endpoints
 - Secure handling of database credentials through environment variables
+
 Passwords are never returned in API responses.
 
-License
+---
+
+## License
+
 This project was developed as a backend developer final project assignment.
